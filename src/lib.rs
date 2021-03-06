@@ -106,6 +106,7 @@ impl AIO {
         fd: RawFd,
         off: u64,
         data: Box<[u8]>,
+        length: usize,
         priority: u16,
         flags: u32,
         opcode: abi::IOCmd,
@@ -115,7 +116,15 @@ impl AIO {
         iocb.aio_lio_opcode = opcode as u16;
         iocb.aio_reqprio = priority;
         iocb.aio_buf = data.as_ptr() as u64;
-        iocb.aio_nbytes = data.len() as u64;
+        //TODO(st1page): handle error
+        if length > data.len() {
+            panic!("length={}, data.len={}", length, data.len());
+        }
+        if length==0 {
+            iocb.aio_nbytes = data.len() as u64;
+        } else {
+            iocb.aio_nbytes = length as u64;
+        }
         iocb.aio_offset = off;
         iocb.aio_flags = flags;
         iocb.aio_data = id;
@@ -463,6 +472,29 @@ impl AIOManager {
             fd,
             offset,
             data,
+            length,
+            priority,
+            0,
+            abi::IOCmd::PRead,
+        );
+        self.scheduler_in.schedule(aio, &self.notifier)
+    }
+
+    pub fn read_inplace(
+        &self,
+        fd: RawFd,
+        offset: u64,
+        length: usize,
+        buf :Box<[u8]>,
+        priority: Option<u16>,
+    ) -> AIOFuture {
+        let priority = priority.unwrap_or(0);
+        let aio = AIO::new(
+            self.scheduler_in.next_id(),
+            fd,
+            offset,
+            buf,
+            length,
             priority,
             0,
             abi::IOCmd::PRead,
@@ -478,11 +510,13 @@ impl AIOManager {
         priority: Option<u16>,
     ) -> AIOFuture {
         let priority = priority.unwrap_or(0);
+        let length = data.len();
         let aio = AIO::new(
             self.scheduler_in.next_id(),
             fd,
             offset,
             data,
+            length,
             priority,
             0,
             abi::IOCmd::PWrite,
